@@ -1,0 +1,25 @@
+# Runs the tests on every pull request and every push to main.
+# The job name "test" is the check name GitHub will require before merging.
+# This workflow needs no API key and no running Ollama, because tests use a fake model.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the workflow only needs to read the code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Pinned so a new Python release cannot break CI without a code change.
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest
