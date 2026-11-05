@@ -12,6 +12,10 @@ Why this matters to a customer:
     loops) without waiting for a real model to misbehave by chance.
 """
 
+# pytest gives us pytest.raises, which checks that a piece of code fails in the
+# way we expect. We need it to test failure behavior, not just success.
+import pytest
+
 # FakeModel is the stand in we are testing. It does not exist yet, so this
 # import is the first thing that fails. That is the "red" step of test first
 # development: we write the test, watch it fail for the right reason, and only
@@ -53,3 +57,28 @@ def test_fake_model_returns_scripted_replies_in_order() -> None:
     # would catch the fake quietly returning a copy or a rebuilt reply.
     assert fake([{"role": "user", "content": "hi"}]) is first
     assert fake([{"role": "user", "content": "again"}]) is second
+
+
+def test_fake_model_raises_clear_error_when_script_runs_out() -> None:
+    """Protects against a confusing failure when code asks the model too often.
+
+    Why it matters:
+        If the agent loop has a bug and calls the model more times than a test
+        expected, we want a message that says exactly that. A bare IndexError
+        points at the inside of the fake and sends a reader down the wrong
+        path. A clear message shortens debugging, and Phase 1 will rely on it
+        to prove the loop stops when it should.
+    """
+    # Arrange: a script with exactly one reply.
+    fake = FakeModel([ModelReply(content="only one")])
+
+    # The first call uses up the only reply. This is normal and should work.
+    fake([{"role": "user", "content": "first call"}])
+
+    # Act and assert: the second call has nothing left to return.
+    # pytest.raises passes only if the code inside raises RuntimeError.
+    # match checks the message with a regular expression, so a reader who sees
+    # this failure in a log knows what happened. If any other error type
+    # appears (like IndexError), this test fails, and that is the point.
+    with pytest.raises(RuntimeError, match="no scripted replies left"):
+        fake([{"role": "user", "content": "second call"}])

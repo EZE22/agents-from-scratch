@@ -19,7 +19,8 @@ class FakeModel:
 
     What a reader might get wrong:
         Each call uses up one reply. Calling it more times than you scripted
-        replies is not handled yet. That behavior gets its own test later.
+        replies raises a RuntimeError. That is deliberate: a loop that keeps
+        asking the model is a bug we want to see, not hide.
     """
 
     def __init__(self, replies: list[ModelReply]) -> None:
@@ -45,7 +46,21 @@ class FakeModel:
 
         Returns:
             The next ModelReply from the script.
+
+        Raises:
+            RuntimeError: If every scripted reply has already been used.
         """
+        # Check before reading. Without this, running off the end of the list
+        # raises a bare IndexError that points at the inside of this class.
+        # A reader debugging a loop needs to hear "the model was asked more
+        # times than the test expected", so we say that in plain words.
+        if self._next_index >= len(self._replies):
+            raise RuntimeError(
+                "FakeModel has no scripted replies left. "
+                f"It was called {self._next_index + 1} times "
+                f"but only {len(self._replies)} replies were scripted."
+            )
+
         reply = self._replies[self._next_index]
         self._next_index += 1
         return reply
