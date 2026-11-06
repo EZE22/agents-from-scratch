@@ -13,14 +13,21 @@ from agent.model import ModelReply
 class FakeModel:
     """Returns pre written replies, one per call, in the order given.
 
-    It is called like a function: fake(messages). That is on purpose. The real
-    model function is also called that way, so either can be handed to the
-    agent loop.
+    It is called like a function: fake(messages, tools=None). That is on
+    purpose. The real model function is called the same way, so either can be
+    handed to the agent loop.
+
+    It also records every call it receives in the calls attribute, so a test
+    can check exactly what the code under test sent to the model.
 
     What a reader might get wrong:
         Each call uses up one reply. Calling it more times than you scripted
         replies raises a RuntimeError. That is deliberate: a loop that keeps
         asking the model is a bug we want to see, not hide.
+
+    Attributes:
+        calls: One entry per call, oldest first. Each entry is a pair:
+            (messages, tools), exactly as the caller passed them.
     """
 
     def __init__(self, replies: list[ModelReply]) -> None:
@@ -36,13 +43,26 @@ class FakeModel:
         # Which reply to hand out next. Starts at the first one.
         self._next_index = 0
 
-    def __call__(self, messages: list[dict[str, str]]) -> ModelReply:
-        """Return the next scripted reply.
+        # What we were sent on each call. Starts empty.
+        self.calls: list[
+            tuple[list[dict[str, str]], list[dict[str, object]] | None]
+        ] = []
+
+    def __call__(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, object]] | None = None,
+    ) -> ModelReply:
+        """Record the call, then return the next scripted reply.
 
         Args:
             messages: The conversation so far, a list of {"role", "content"}
-                dicts. The fake ignores it, but the real model reads it, so
-                the fake must accept it to stay swappable.
+                dicts. The fake does not read it to decide what to say, but it
+                records it, and it must accept it to stay swappable with the
+                real model.
+            tools: The tools on offer to the model, or None for no tools. The
+                default of None is why older tests that pass only messages
+                still work.
 
         Returns:
             The next ModelReply from the script.
@@ -50,6 +70,18 @@ class FakeModel:
         Raises:
             RuntimeError: If every scripted reply has already been used.
         """
+        # Record a snapshot of the messages, not the live list. The agent loop
+        # keeps adding to one growing list. If we stored that same list, every
+        # recorded call would quietly show the final conversation.
+        #
+        # What a reader might get wrong: list(...) copies the list, not the
+        # message dicts inside it. That is enough while nothing edits a message
+        # in place. If that ever changes, a test comes first, then a deeper copy.
+        #
+        # The tools are stored as given, because nothing changes that list
+        # after the call. The same rule applies: if that changes, test first.
+        self.calls.append((list(messages), tools))
+
         # Check before reading. Without this, running off the end of the list
         # raises a bare IndexError that points at the inside of this class.
         # A reader debugging a loop needs to hear "the model was asked more

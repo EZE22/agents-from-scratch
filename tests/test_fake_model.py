@@ -82,3 +82,39 @@ def test_fake_model_raises_clear_error_when_script_runs_out() -> None:
     # appears (like IndexError), this test fails, and that is the point.
     with pytest.raises(RuntimeError, match="no scripted replies left"):
         fake([{"role": "user", "content": "second call"}])
+
+
+def test_fake_model_records_what_it_was_sent_as_a_snapshot() -> None:
+    """Protects our ability to check what the agent loop sent to the model.
+
+    Why it matters:
+        In Phase 1 the loop will build a conversation, call the model, add a
+        tool result, and call the model again. To prove the loop did that
+        correctly, a test needs to see exactly what the model received on each
+        call. The fake records it for us.
+
+    What a reader might get wrong:
+        The fake must store a snapshot (a copy), not the live list. The loop
+        keeps adding messages to one growing list. If the fake kept that same
+        list, every recorded call would quietly show the final conversation,
+        and a test could pass or fail for the wrong reason. The second half of
+        this test catches that.
+    """
+    fake = FakeModel([ModelReply(content="ok")])
+
+    # The conversation and the tools on offer, as the loop would pass them.
+    # The tool description is a made up example in Ollama's format.
+    messages = [{"role": "user", "content": "hi"}]
+    tools = [{"type": "function", "function": {"name": "get_weather"}}]
+
+    fake(messages, tools=tools)
+
+    # The fake recorded one call: the messages and the tools it was given.
+    assert fake.calls == [(messages, tools)]
+
+    # Now behave like the loop: add a message to the SAME list after the call.
+    messages.append({"role": "assistant", "content": "ok"})
+
+    # The recorded call must still show only the one message it received at
+    # the time. If this fails, the fake stored a reference, not a snapshot.
+    assert len(fake.calls[0][0]) == 1
