@@ -16,6 +16,11 @@ How the test data was made:
     output so our tests match reality, not our guess of it.
 """
 
+# pytest gives us parametrize (run one test over many inputs) and raises
+# (check that code fails the way we expect).
+import pytest
+from typing import Any
+
 # parse_reply does not exist yet, so this import is the first thing that
 # fails. That is the red step.
 from agent.model import ModelReply, ToolCall, parse_reply
@@ -93,3 +98,61 @@ def test_parse_reply_turns_a_tool_request_into_tool_calls() -> None:
     )
 
     assert parse_reply(TOOL_REPLY) == expected
+
+
+# Five replies a model or a broken server could send. Each one is wrong in a
+# different way. We list them as data so adding a sixth later is one line.
+# The ids are labels pytest shows in its report, so a failure names the case.
+BAD_REPLIES = [
+    pytest.param({"done": True}, id="no_message_at_all"),
+    pytest.param({"message": "hello"}, id="message_is_text_not_a_dict"),
+    pytest.param(
+        {"message": {"role": "assistant", "content": 42}},
+        id="content_is_a_number_not_text",
+    ),
+    pytest.param(
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"arguments": {"city": "Atlanta"}}}],
+            }
+        },
+        id="tool_call_has_no_name",
+    ),
+    pytest.param(
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "get_weather", "arguments": "city=Atlanta"}}
+                ],
+            }
+        },
+        id="tool_arguments_are_text_not_a_dict",
+    ),
+]
+
+
+@pytest.mark.parametrize("bad_reply", BAD_REPLIES)
+def test_parse_reply_rejects_malformed_replies(bad_reply: dict[str, Any]) -> None:
+    """Protects the rule: never trust what a model returns.
+
+    Why it matters:
+        A model can send nonsense, and a broken server can send nonsense too.
+        If bad data slips through here, it reaches our tools. For a customer,
+        that is how an agent ends up running a tool with garbage inputs.
+
+    What a reader might get wrong:
+        Failing loudly is the goal. A reply that is accepted silently is worse
+        than one that crashes, because nothing warns anyone. Run this test
+        before the fix and you will see both kinds: some cases crash, and some
+        are accepted without a word.
+
+    About match:
+        Every error starts with "Bad model reply", so a log search finds all of
+        them with one phrase.
+    """
+    with pytest.raises(ValueError, match="Bad model reply"):
+        parse_reply(bad_reply)

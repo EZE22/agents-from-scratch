@@ -60,12 +60,88 @@ class ModelReply:
     tool_calls: list[ToolCall] = field(default_factory=list)
 
 
+def _bad_reply(detail: str) -> ValueError:
+    """Build the error we raise for a reply we refuse to accept.
+
+    Every refusal starts with the same phrase, "Bad model reply", so a log
+    search finds all of them at once. We return the error instead of raising
+    it here so the "raise" stays visible at the place where the check failed.
+    """
+    return ValueError(f"Bad model reply: {detail}")
+
+
+def _read_message(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return the "message" part of Ollama's reply, or refuse the reply.
+
+    Ollama puts the model's answer under "message". If it is missing, or is
+    something other than a dictionary, there is nothing safe to read.
+    """
+    message = raw.get("message")
+
+    # isinstance checks the real type at run time. We cannot trust the type
+    # hints here, because hints are only promises we make to ourselves. This
+    # data came from outside the program.
+    if not isinstance(message, dict):
+        raise _bad_reply("there is no 'message' dictionary")
+    return message
+
+
+def _read_content(message: dict[str, Any]) -> str:
+    """Return the text the model said, or refuse the reply.
+
+    The text must be a string. An empty string is fine and normal: a model that
+    only asks for a tool usually says nothing in words.
+    """
+    content = message.get("content")
+
+    # A number or a list here would otherwise flow silently into our code and
+    # fail somewhere far from the cause. We stop it at the door.
+    if not isinstance(content, str):
+        raise _bad_reply("'content' is not text")
+    return content
+
+
+def _read_tool_call(item: Any) -> ToolCall:
+    """Turn one tool request from the model into a ToolCall, or refuse it.
+
+    Args:
+        item: One entry from the reply's "tool_calls" list. The type is Any
+            because it came from outside the program and could be anything.
+
+    Real example of a good entry:
+        {"id": "call_x", "function": {"name": "get_weather",
+                                      "arguments": {"city": "Atlanta"}}}
+    """
+    function = item.get("function") if isinstance(item, dict) else None
+    if not isinstance(function, dict):
+        raise _bad_reply("a tool call has no 'function' dictionary")
+
+    name = function.get("name")
+    # A tool with no name cannot be looked up, so there is nothing to run.
+    # "not name" also catches an empty string.
+    if not isinstance(name, str) or not name:
+        raise _bad_reply("a tool call has no name")
+
+    arguments = function.get("arguments")
+    # Ollama sends arguments as a dictionary. Some other hosts send a JSON
+    # string. We accept only the dictionary, so a surprise shows up here as a
+    # clear error instead of as a tool receiving the wrong kind of input.
+    if not isinstance(arguments, dict):
+        raise _bad_reply(f"the arguments for '{name}' are not a dictionary")
+
+    return ToolCall(name=name, arguments=arguments)
+
+
 def parse_reply(raw: dict[str, Any]) -> ModelReply:
     """Turn the raw reply from Ollama into our own ModelReply.
 
     This is the one place in the project that knows what Ollama's reply looks
     like. Everything else only sees ModelReply. If we move to a different model
     host, this is the function that changes.
+
+    It also enforces the rule that model output is never trusted. A reply that
+    does not look right is refused with a ValueError, so bad data cannot reach
+    our tools.
 
     Args:
         raw: The reply document from Ollama's /api/chat, already converted from
@@ -77,29 +153,20 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
         A ModelReply holding the text the model said and any tools it asked
         to run.
 
+    Raises:
+        ValueError: If the reply is malformed. The message starts with
+            "Bad model reply".
+
     What a reader might get wrong:
-        This version trusts the document completely. It will crash with a
-        KeyError on a reply with no "message". That is known and temporary. We
-        add checks one at a time, each with its own failing test first, because
-        model output must never be trusted.
+        The checks cover the five bad replies we have tests for. They are not
+        complete. For example, "tool_calls" being something other than a list
+        is not checked yet. Each gap gets its own failing test before its fix.
     """
-    # Ollama puts the model's answer under "message", and the text under
-    # "content". Real example: {"message": {"role": "assistant", "content": "Hi!"}}
-    message = raw["message"]
+    message = _read_message(raw)
+    content = _read_content(message)
 
-    # A reply that only asks for a tool has no text, and a reply that only
-    # speaks has no "tool_calls" key at all. .get(..., []) covers the second
-    # case: it gives an empty list when the key is missing, instead of crashing.
-    # Real example of one request:
-    #   {"id": "call_x", "function": {"name": "get_weather",
-    #                                 "arguments": {"city": "Atlanta"}}}
-    # We keep only the name and arguments. The id and index are ignored for now.
-    tool_calls = [
-        ToolCall(
-            name=item["function"]["name"],
-            arguments=item["function"]["arguments"],
-        )
-        for item in message.get("tool_calls", [])
-    ]
+    # A reply that only speaks has no "tool_calls" key at all. .get(..., [])
+    # gives an empty list in that case, instead of crashing.
+    tool_calls = [_read_tool_call(item) for item in message.get("tool_calls", [])]
 
-    return ModelReply(content=message["content"], tool_calls=tool_calls)
+    return ModelReply(content=content, tool_calls=tool_calls)
