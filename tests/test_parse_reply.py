@@ -18,7 +18,7 @@ How the test data was made:
 
 # parse_reply does not exist yet, so this import is the first thing that
 # fails. That is the red step.
-from agent.model import ModelReply, parse_reply
+from agent.model import ModelReply, ToolCall, parse_reply
 
 # A real reply where the model simply said something.
 # "message" holds what the model produced. "done_reason" is "stop" when the
@@ -43,3 +43,53 @@ def test_parse_reply_turns_a_text_reply_into_a_model_reply() -> None:
         expected value relies on tool_calls defaulting to an empty list.
     """
     assert parse_reply(TEXT_REPLY) == ModelReply(content="Hi!")
+
+
+# A real reply where the model did not answer in words. It asked for the
+# get_weather tool instead. Notice three things about the real shape:
+#   1. "content" is empty, because the model said nothing in words.
+#   2. "tool_calls" is a list, because a model can ask for several tools.
+#   3. Each request nests its name and arguments under "function".
+# The "id" and "index" fields are ignored for now. We will add them only if a
+# later step needs them.
+TOOL_REPLY = {
+    "model": "qwen3:8b",
+    "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_e8jfj198",
+                "function": {
+                    "index": 0,
+                    "name": "get_weather",
+                    "arguments": {"city": "Atlanta"},
+                },
+            }
+        ],
+    },
+    "done": True,
+    "done_reason": "stop",
+}
+
+
+def test_parse_reply_turns_a_tool_request_into_tool_calls() -> None:
+    """Protects the moment that makes an agent possible: the model asking for
+    a tool is read correctly.
+
+    Why it matters:
+        The agent loop only works if a tool request arrives as a ToolCall with
+        the right name and arguments. Misreading it here would send the wrong
+        tool the wrong input.
+
+    What a reader might get wrong:
+        Ollama already gives the arguments as a dictionary. Some other model
+        hosts send them as a JSON string. This test covers Ollama only. A
+        different host would need its own version of this test and function.
+    """
+    expected = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="get_weather", arguments={"city": "Atlanta"})],
+    )
+
+    assert parse_reply(TOOL_REPLY) == expected

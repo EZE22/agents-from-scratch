@@ -74,7 +74,8 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
             promise more than that.
 
     Returns:
-        A ModelReply holding the text the model said.
+        A ModelReply holding the text the model said and any tools it asked
+        to run.
 
     What a reader might get wrong:
         This version trusts the document completely. It will crash with a
@@ -85,4 +86,20 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
     # Ollama puts the model's answer under "message", and the text under
     # "content". Real example: {"message": {"role": "assistant", "content": "Hi!"}}
     message = raw["message"]
-    return ModelReply(content=message["content"])
+
+    # A reply that only asks for a tool has no text, and a reply that only
+    # speaks has no "tool_calls" key at all. .get(..., []) covers the second
+    # case: it gives an empty list when the key is missing, instead of crashing.
+    # Real example of one request:
+    #   {"id": "call_x", "function": {"name": "get_weather",
+    #                                 "arguments": {"city": "Atlanta"}}}
+    # We keep only the name and arguments. The id and index are ignored for now.
+    tool_calls = [
+        ToolCall(
+            name=item["function"]["name"],
+            arguments=item["function"]["arguments"],
+        )
+        for item in message.get("tool_calls", [])
+    ]
+
+    return ModelReply(content=message["content"], tool_calls=tool_calls)
