@@ -172,7 +172,11 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
     return ModelReply(content=content, tool_calls=tool_calls)
 
 
-def build_request(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+def build_request(
+    model: str,
+    messages: list[dict[str, str]],
+    tools: list[dict[str, object]] | None = None,
+) -> dict[str, Any]:
     """Build the request we send to Ollama's /api/chat.
 
     This only builds a dictionary. It does not touch the network, which is why
@@ -182,15 +186,20 @@ def build_request(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
     Args:
         model: The Ollama model name, for example "qwen3:8b".
         messages: The conversation so far, a list of {"role", "content"} dicts.
+        tools: The tools the model may ask for, in Ollama's format, or None to
+            offer none. The same value the fake model accepts, so the two stay
+            swappable.
 
     Returns:
         A dictionary ready to be turned into JSON and sent to Ollama.
 
     What a reader might get wrong:
-        This version cannot offer tools to the model yet. Tools get their own
-        failing test first.
+        The "tools" key is left out when there are no tools, including when an
+        empty list is passed. The model only learns about tools we pass in, so
+        a missing key and an empty list both mean "no tools on offer". The empty
+        list case has no test of its own yet.
     """
-    return {
+    request: dict[str, Any] = {
         "model": model,
         "messages": messages,
         # We want the whole reply as one document. Streaming sends it in
@@ -202,3 +211,11 @@ def build_request(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
         # hard questions, so we may turn it on later, with a test.
         "think": False,
     }
+
+    # Only add the key when there is something to offer. A model can only ask
+    # for a tool it has been told about, so this field is what makes tool calls
+    # possible at all.
+    if tools:
+        request["tools"] = tools
+
+    return request

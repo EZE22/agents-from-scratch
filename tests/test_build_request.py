@@ -47,3 +47,48 @@ def test_build_request_for_a_plain_chat_has_no_tools() -> None:
     }
 
     assert build_request("qwen3:8b", messages) == expected
+
+
+def test_build_request_includes_tools_when_they_are_offered() -> None:
+    """Protects the moment that lets a model ask for a tool.
+
+    Why it matters:
+        A model can only ask for a tool it has been told about. The "tools"
+        field is how we tell it. If it is missing or misplaced, the model will
+        guess an answer in words instead of asking our code to run the tool,
+        and nothing downstream will warn us.
+
+    What a reader might get wrong:
+        We pass the tool descriptions through unchanged. Each one holds a name,
+        a plain language description and a schema for the inputs. The model
+        reads the description to decide whether to use the tool, so how well it
+        is written matters as much as the code behind it.
+    """
+    messages = [{"role": "user", "content": "What is the weather in Atlanta?"}]
+
+    # A made up tool in the format Ollama expects. This is the same shape we
+    # sent in our real curl test, where the model asked for it.
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get the weather for a city",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        }
+    ]
+
+    expected = {
+        "model": "qwen3:8b",
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "tools": tools,
+    }
+
+    assert build_request("qwen3:8b", messages, tools=tools) == expected
