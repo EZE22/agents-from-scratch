@@ -170,3 +170,35 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
     tool_calls = [_read_tool_call(item) for item in message.get("tool_calls", [])]
 
     return ModelReply(content=content, tool_calls=tool_calls)
+
+
+def build_request(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Build the request we send to Ollama's /api/chat.
+
+    This only builds a dictionary. It does not touch the network, which is why
+    we can test it without a model running. Sending the request is a separate,
+    thinner step.
+
+    Args:
+        model: The Ollama model name, for example "qwen3:8b".
+        messages: The conversation so far, a list of {"role", "content"} dicts.
+
+    Returns:
+        A dictionary ready to be turned into JSON and sent to Ollama.
+
+    What a reader might get wrong:
+        This version cannot offer tools to the model yet. Tools get their own
+        failing test first.
+    """
+    return {
+        "model": model,
+        "messages": messages,
+        # We want the whole reply as one document. Streaming sends it in
+        # pieces, which is only worth the extra work if a customer needs words
+        # to appear live.
+        "stream": False,
+        # qwen3 can write long reasoning before it answers. That is slow and
+        # adds text we do not use. This is a trade off: thinking can help with
+        # hard questions, so we may turn it on later, with a test.
+        "think": False,
+    }
