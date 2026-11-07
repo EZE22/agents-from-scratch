@@ -9,6 +9,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from agent.model import ModelReply
+from agent.tools import run_tool
+
+
+# The most times we will ask the model in one run. A model can ask for tools
+# forever, and every ask costs time and money. This cap is a hard stop that
+# the model cannot talk its way past. Five is enough for one tool.
+MAX_STEPS = 5
 
 
 @dataclass
@@ -27,16 +34,43 @@ class AgentResult:
 
 
 def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
-    """Answer a question by asking the model.
+    """Answer a question, using the tool when the model asks for it.
+
+    This is an agent. The model decides whether to call a tool or to answer.
+    Our code runs the loop, runs the tool and sets the limit.
 
     The model is passed in as a function. Tests pass FakeModel. A real run
     passes call_model. That keeps this loop free of any one model.
 
-    Right now this asks the model once and returns its text, because the
-    first test only covers that path. The tool calls and the step limit
-    come with their own tests. A reader should not mistake this for the
-    finished loop.
+    Known gaps, each coming with its own test: the model is not yet told
+    which tools exist, the model's own tool request is not yet added to the
+    messages, and nothing is logged yet.
     """
     messages = [{"role": "user", "content": question}]
-    reply = model(messages)
-    return AgentResult(answer=reply.content, stop_reason="answered", steps=1)
+
+    # range stops by itself, so this loop cannot run forever. A while True
+    # loop would rely on the model to stop, and a model can fail to.
+    for step in range(1, MAX_STEPS + 1):
+        reply = model(messages)
+
+        # No tool request means the model chose to answer. We stop.
+        if not reply.tool_calls:
+            return AgentResult(
+                answer=reply.content, stop_reason="answered", steps=step
+            )
+
+        # The model only asked. Our code runs the tool, then sends the
+        # result back as a message so the model can use it on the next pass.
+        for call in reply.tool_calls:
+            result = run_tool(call.name, call.arguments)
+            messages.append(
+                {
+                    "role": "tool",
+                    "content": result.content,
+                    "tool_name": call.name,
+                }
+            )
+
+    # We only get here if every pass ended in a tool request. The cap
+    # stopped the run, not the model.
+    return AgentResult(answer="", stop_reason="step_limit", steps=MAX_STEPS)
