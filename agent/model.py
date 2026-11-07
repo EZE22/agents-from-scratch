@@ -31,6 +31,13 @@ REQUEST_TIMEOUT_SECONDS = 120
 DEFAULT_MODEL = "qwen3:8b"
 
 
+# One message in a conversation with the model. Most values are text, such as
+# the role and the content. But a tool request holds a list of tool calls, so
+# the value type has to be object. A reader might think dict[str, str] is
+# enough. It stopped being true when we recorded tool requests.
+Message = dict[str, object]
+
+
 @dataclass
 class ToolCall:
     """A request from the model to run one tool.
@@ -193,7 +200,7 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
 
 def build_request(
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[Message],
     tools: list[dict[str, object]] | None = None,
 ) -> dict[str, Any]:
     """Build the request we send to Ollama's /api/chat.
@@ -241,7 +248,7 @@ def build_request(
 
 
 def call_model(
-    messages: list[dict[str, str]],
+    messages: list[Message],
     tools: list[dict[str, object]] | None = None,
     *,
     post: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,

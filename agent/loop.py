@@ -8,7 +8,7 @@ the limits and names the reason it stopped.
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from agent.model import ModelReply
+from agent.model import Message, ModelReply
 from agent.tools import TOOL_SPECS, run_tool
 
 
@@ -45,7 +45,7 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     Known gaps, each coming with its own test: the model's own tool request
     is not yet added to the messages, and nothing is logged yet.
     """
-    messages = [{"role": "user", "content": question}]
+    messages: list[Message] = [{"role": "user", "content": question}]
 
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.

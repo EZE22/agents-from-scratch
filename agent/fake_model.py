@@ -7,7 +7,7 @@ Why it exists:
     behaves when the model misbehaves.
 """
 
-from agent.model import ModelReply
+from agent.model import Message, ModelReply
 
 
 class FakeModel:
@@ -45,12 +45,12 @@ class FakeModel:
 
         # What we were sent on each call. Starts empty.
         self.calls: list[
-            tuple[list[dict[str, str]], list[dict[str, object]] | None]
+            tuple[list[Message], list[dict[str, object]] | None]
         ] = []
 
     def __call__(
         self,
-        messages: list[dict[str, str]],
+        messages: list[Message],
         tools: list[dict[str, object]] | None = None,
     ) -> ModelReply:
         """Record the call, then return the next scripted reply.
