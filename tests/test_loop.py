@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from agent.fake_model import FakeModel
-from agent.loop import MAX_STEPS, run_agent
+from agent.loop import MAX_BAD_REPLIES, MAX_STEPS, run_agent
 from agent.model import ModelReply, ToolCall
 
 
@@ -200,3 +200,28 @@ def test_agent_recovers_when_one_model_reply_is_refused() -> None:
     last_message = model.calls[1][0][-1]
     assert last_message["role"] == "user"
     assert "a tool call has no name" in str(last_message["content"])
+
+
+def test_agent_stops_with_bad_replies_when_the_model_keeps_being_refused() -> None:
+    """Protects: the retry limit for bad replies.
+
+    Why it matters:
+        A small model can get stuck sending the same broken tool call. Every
+        ask costs time and money, so we stop after a few refusals and name
+        the reason. A person reading the logs then knows the model failed,
+        not the tool.
+
+    What a reader might get wrong:
+        The script holds exactly MAX_BAD_REPLIES errors. If the loop asked
+        the model once more, FakeModel would raise an error and fail this
+        test. The limit counts every refused reply in one run. It is lower
+        than MAX_STEPS, so it is reached first when every reply is bad.
+    """
+    refused = ValueError("Bad model reply: a tool call has no name")
+    model = FakeModel([refused] * MAX_BAD_REPLIES)
+
+    result = run_agent("What is the capital of France?", model)
+
+    assert result.stop_reason == "bad_replies"
+    assert result.answer == ""
+    assert result.steps == MAX_BAD_REPLIES

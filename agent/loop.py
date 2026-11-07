@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 # the model cannot talk its way past. Five is enough for one tool.
 MAX_STEPS = 5
 
+# The most refused replies we accept in one run. A model that is stuck
+# sending broken tool calls will not fix itself on the tenth try, and every
+# try costs time and money. It is lower than MAX_STEPS on purpose, so this
+# limit is reached first when every reply is bad. Three is a starting point,
+# and the model comparison will show whether it is a good one.
+MAX_BAD_REPLIES = 3
+
 
 @dataclass
 class AgentResult:
@@ -51,6 +58,9 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     """
     messages: list[Message] = [{"role": "user", "content": question}]
 
+    # How many replies have been refused so far in this run.
+    bad_replies = 0
+
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.
     for step in range(1, MAX_STEPS + 1):
@@ -64,7 +74,21 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
             # to record from the model. We tell it what went wrong and ask
             # again. The next pass of the loop is the retry. We log the
             # step and the status only, never the error text.
-            logger.warning("step %d: model reply was refused", step)
+            bad_replies += 1
+            logger.warning(
+                "step %d: model reply was refused (%d of %d)",
+                step,
+                bad_replies,
+                MAX_BAD_REPLIES,
+            )
+
+            # Out of tries. The code stops the run, not the model, and it
+            # names the reason so the logs never leave anyone guessing.
+            if bad_replies >= MAX_BAD_REPLIES:
+                return AgentResult(
+                    answer="", stop_reason="bad_replies", steps=step
+                )
+
             messages.append(
                 {
                     "role": "user",
