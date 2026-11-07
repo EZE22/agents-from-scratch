@@ -51,3 +51,36 @@ from agent.model import call_model
 print(run_agent('How many words are in this sentence: the quick brown fox jumps over the lazy dog', call_model))
 "
 ```
+
+## Phase 2: checking what the model sends back
+
+A model can send bad output. It can send a reply our code cannot read, ask for a tool that does not exist, or give a tool the wrong inputs. So our code treats every model reply as untrusted and checks it before acting on it.
+
+```mermaid
+flowchart TD
+    Start([Start: question in]) --> Call[call_model]
+    Call -.->|5 passes used| Limit[Stop: step_limit]
+    Call --> Check{{parse_reply checks the reply}}
+    Check -->|refused| Count1[Count the refused reply]
+    Count1 -->|under 3| Tell[Tell the model what was wrong]
+    Tell --> Call
+    Count1 -->|3 reached| StopBad[Stop: bad_replies]
+    Check -->|answer| Answered[Stop: answered]
+    Check -->|tool call| Tool[run_tool]
+    Tool -->|ok, result goes back| Call
+    Tool -->|failed| Count2[Count the failed call]
+    Count2 -->|under 3, failure goes back| Call
+    Count2 -->|3 reached| StopTool[Stop: tool_failures]
+    Limit --> End([End: answer and stop reason])
+    Answered --> End
+    StopBad --> End
+    StopTool --> End
+```
+
+parse_reply is the door. It refuses a reply that has the wrong shape, for example when the tool calls are not a list. When a reply is refused, the loop tells the model what was wrong and asks again. After 3 refused replies the run stops with the reason bad_replies.
+
+A reply can have the right shape and still be a bad call, for example a tool that does not exist. run_tool sends back a failed result that names the real tools, so the model can try again. After 3 failed tool calls the run stops with the reason tool_failures.
+
+The model decides when it is done. Our code decides when to cut it off. Every run ends with a named reason: answered, step_limit, bad_replies or tool_failures. Each limit is a small number at the top of agent/loop.py.
+
+The tests use FakeModel, which can raise an error on cue, so no test calls a real model.
