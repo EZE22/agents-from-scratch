@@ -42,3 +42,15 @@ def test_run_tool_missing_argument_returns_failed_result() -> None:
 
     assert result.status == "failed"
     assert "text" in result.content
+
+
+def test_run_tool_wrong_argument_type_returns_failed_result() -> None:
+    # Protects: the right argument name with the wrong kind of value never
+    # crashes the agent. Models sometimes send a number where text belongs.
+    # The failed message names the argument and the type we wanted, so the
+    # model can read it and send a string next time.
+    result = run_tool("count_words", {"text": 5})
+
+    assert result.status == "failed"
+    assert "text" in result.content
+    assert "string" in result.content

@@ -16,7 +16,8 @@ class ToolResult:
     Every tool returns this same shape. That way the loop never has to
     guess what came back, and a failure can be told apart from a success.
 
-    status is "ok" for now. A "failed" status comes later, with its own test.
+    status is "ok" or "failed". A failed result holds a short message the
+    model can read, so it can fix its request and try again.
     content is always text, because tool results travel back to the model
     as message text. A reader might expect a number here, but the model only
     reads text, so the count is stored as a string.
@@ -36,6 +37,17 @@ def count_words(text: str) -> ToolResult:
     split() with no argument splits on any run of spaces, tabs or new lines
     and ignores extra spaces, so "a  b" counts as two words, not three.
     """
+    # Type hints are not enforced when the program runs, and the model may
+    # send anything. So the tool checks for itself. A reader might think the
+    # hint "text: str" already protects us. It does not.
+    if not isinstance(text, str):
+        return ToolResult(
+            status="failed",
+            content=(
+                f"Bad argument 'text': expected a string, "
+                f"got {type(text).__name__}."
+            ),
+        )
     return ToolResult(status="ok", content=str(len(text.split())))
 
 
