@@ -35,3 +35,25 @@ def count_words(text: str) -> ToolResult:
     and ignores extra spaces, so "a  b" counts as two words, not three.
     """
     return ToolResult(status="ok", content=str(len(text.split())))
+
+
+def run_tool(name: str, arguments: dict[str, object]) -> ToolResult:
+    """Run the tool the model asked for, or say why we could not.
+
+    This is the one door between the model's request and our tools. The
+    model only asks. Our code decides what runs. Right now every name is
+    treated as unknown, because the first test only covers that path. The
+    next test will make real tools run.
+
+    arguments is not used yet. It is in the signature now so the loop can
+    call run_tool the final way from the start.
+
+    A failed result holds a plain message the model can read. It names the
+    bad tool and lists the real ones, so the model can correct itself. A
+    reader might expect an exception here. We return a result instead,
+    because an exception would crash the whole agent run.
+    """
+    return ToolResult(
+        status="failed",
+        content=f"Unknown tool '{name}'. Available tools: count_words.",
+    )
