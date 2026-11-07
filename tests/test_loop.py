@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from agent.fake_model import FakeModel
-from agent.loop import MAX_BAD_REPLIES, MAX_STEPS, run_agent
+from agent.loop import MAX_BAD_REPLIES, MAX_STEPS, MAX_TOOL_FAILURES, run_agent
 from agent.model import ModelReply, ToolCall
 
 
@@ -225,3 +225,32 @@ def test_agent_stops_with_bad_replies_when_the_model_keeps_being_refused() -> No
     assert result.stop_reason == "bad_replies"
     assert result.answer == ""
     assert result.steps == MAX_BAD_REPLIES
+
+
+def test_agent_stops_with_tool_failures_when_every_tool_call_fails() -> None:
+    """Protects: the limit on failed tool calls.
+
+    Why it matters:
+        A model can ask for a tool that does not exist, again and again.
+        run_tool answers each time with a failed result the model can read,
+        but a stuck model may ignore it. We stop after a few failures and
+        name the reason, so the logs say the tool calls failed, not that
+        the model ran out of steps.
+
+    What a reader might get wrong:
+        get_weather is not a real tool in this project, so every call fails.
+        The script holds exactly MAX_TOOL_FAILURES replies. If the loop asked
+        the model once more, FakeModel would raise an error and fail this
+        test.
+    """
+    bad_call = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="get_weather", arguments={"city": "Atlanta"})],
+    )
+    model = FakeModel([bad_call] * MAX_TOOL_FAILURES)
+
+    result = run_agent("What is the weather in Atlanta?", model)
+
+    assert result.stop_reason == "tool_failures"
+    assert result.answer == ""
+    assert result.steps == MAX_TOOL_FAILURES

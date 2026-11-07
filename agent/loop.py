@@ -31,6 +31,12 @@ MAX_STEPS = 5
 # and the model comparison will show whether it is a good one.
 MAX_BAD_REPLIES = 3
 
+# The most failed tool calls we accept in one run. A failed call means the
+# model asked for a tool that does not exist, or gave it the wrong inputs.
+# The model gets a readable message each time, so a few tries are fair. A
+# model that keeps failing is stuck, and each try costs time and money.
+MAX_TOOL_FAILURES = 3
+
 
 @dataclass
 class AgentResult:
@@ -60,6 +66,9 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
 
     # How many replies have been refused so far in this run.
     bad_replies = 0
+
+    # How many tool calls have failed so far in this run.
+    tool_failures = 0
 
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.
@@ -145,6 +154,20 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
                     "tool_name": call.name,
                 }
             )
+
+            # The failed result is already in the conversation, so the model
+            # has been told. Now we count it. The code stops the run, not the
+            # model, and names the reason. A reader might get wrong: one
+            # reply with two failed calls counts as two failures.
+            if result.status == "failed":
+                tool_failures += 1
+                if tool_failures >= MAX_TOOL_FAILURES:
+                    logger.warning(
+                        "stopped after %d failed tool calls", tool_failures
+                    )
+                    return AgentResult(
+                        answer="", stop_reason="tool_failures", steps=step
+                    )
 
     # We only get here if every pass ended in a tool request. The cap
     # stopped the run, not the model. This is a warning, not info, because
