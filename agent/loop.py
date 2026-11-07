@@ -5,12 +5,19 @@ stop, in a loop. The model controls the path. Our code runs the loop, sets
 the limits and names the reason it stopped.
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from agent.model import Message, ModelReply
 from agent.tools import TOOL_SPECS, run_tool
 
+
+# The logger for this file. A logger is a named place that log lines go to.
+# Using the file's own name means a person can turn this file's lines up or
+# down without touching the rest of the project. We never use print for this,
+# because print cannot be filtered, silenced or sent to a log file.
+logger = logging.getLogger(__name__)
 
 # The most times we will ask the model in one run. A model can ask for tools
 # forever, and every ask costs time and money. This cap is a hard stop that
@@ -42,8 +49,8 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     The model is passed in as a function. Tests pass FakeModel. A real run
     passes call_model. That keeps this loop free of any one model.
 
-    Known gaps, each coming with its own test: the model's own tool request
-    is not yet added to the messages, and nothing is logged yet.
+    Known gap, coming with its own test: the step limit stop is not logged
+    yet.
     """
     messages: list[Message] = [{"role": "user", "content": question}]
 
@@ -54,6 +61,7 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
 
         # No tool request means the model chose to answer. We stop.
         if not reply.tool_calls:
+            logger.info("step %d: model answered, stopping", step)
             return AgentResult(
                 answer=reply.content, stop_reason="answered", steps=step
             )
@@ -76,7 +84,18 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
         # The model only asked. Our code runs the tool, then sends the
         # result back as a message so the model can use it on the next pass.
         for call in reply.tool_calls:
+            # We log the tool name and the argument names, never the values.
+            # The values are the user's own text and may be private.
+            logger.info(
+                "step %d: model asked for tool %s with arguments %s",
+                step,
+                call.name,
+                sorted(call.arguments),
+            )
             result = run_tool(call.name, call.arguments)
+            logger.info(
+                "step %d: tool %s returned %s", step, call.name, result.status
+            )
             messages.append(
                 {
                     "role": "tool",

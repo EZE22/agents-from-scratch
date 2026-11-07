@@ -1,5 +1,9 @@
 """Tests for the agent loop."""
 
+import logging
+
+import pytest
+
 from agent.fake_model import FakeModel
 from agent.loop import MAX_STEPS, run_agent
 from agent.model import ModelReply, ToolCall
@@ -108,3 +112,35 @@ def test_agent_records_the_models_tool_request_before_the_result() -> None:
     request_message = second_call_messages[-2]
     assert request_message["role"] == "assistant"
     assert request_message["tool_calls"][0]["function"]["name"] == "count_words"
+
+
+def test_agent_logs_each_step_without_private_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Protects: every step leaves a log line, so a person can see what the
+    # agent did and why it stopped. It also protects privacy: the words the
+    # user sent to the tool must never appear in a log, because real
+    # customer text can be private and logs get shared.
+    model = FakeModel(
+        [
+            ModelReply(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="count_words",
+                        arguments={"text": "one two three four"},
+                    )
+                ],
+            ),
+            ModelReply(content="The text has 4 words."),
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="agent.loop"):
+        run_agent("How many words are in 'one two three four'?", model)
+
+    lines = [record.getMessage() for record in caplog.records]
+    assert any("step 1" in line and "count_words" in line for line in lines)
+    assert any("returned ok" in line for line in lines)
+    assert any("step 2" in line and "answered" in line for line in lines)
+    assert not any("one two three four" in line for line in lines)
