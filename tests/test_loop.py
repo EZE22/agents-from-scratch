@@ -144,3 +144,26 @@ def test_agent_logs_each_step_without_private_text(
     assert any("returned ok" in line for line in lines)
     assert any("step 2" in line and "answered" in line for line in lines)
     assert not any("one two three four" in line for line in lines)
+
+
+def test_agent_logs_a_warning_when_the_step_limit_stops_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Protects: a run cut off by the step limit is visible in the logs as a
+    # warning. The model never gave an answer, so a person watching logs
+    # needs to be able to find these runs. A quiet stop would hide them.
+    tool_request = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="count_words", arguments={"text": "a b"})],
+    )
+    model = FakeModel([tool_request] * MAX_STEPS)
+
+    with caplog.at_level(logging.WARNING, logger="agent.loop"):
+        run_agent("Keep counting forever.", model)
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ]
+    assert any("step limit" in line for line in warnings)

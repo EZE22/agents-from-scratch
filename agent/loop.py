@@ -48,9 +48,6 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
 
     The model is passed in as a function. Tests pass FakeModel. A real run
     passes call_model. That keeps this loop free of any one model.
-
-    Known gap, coming with its own test: the step limit stop is not logged
-    yet.
     """
     messages: list[Message] = [{"role": "user", "content": question}]
 
@@ -105,5 +102,9 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
             )
 
     # We only get here if every pass ended in a tool request. The cap
-    # stopped the run, not the model.
+    # stopped the run, not the model. This is a warning, not info, because
+    # the model never answered and someone watching the logs should see it.
+    logger.warning(
+        "stopped at the step limit of %d without a final answer", MAX_STEPS
+    )
     return AgentResult(answer="", stop_reason="step_limit", steps=MAX_STEPS)
