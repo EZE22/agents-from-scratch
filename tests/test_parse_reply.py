@@ -100,7 +100,7 @@ def test_parse_reply_turns_a_tool_request_into_tool_calls() -> None:
     assert parse_reply(TOOL_REPLY) == expected
 
 
-# Five replies a model or a broken server could send. Each one is wrong in a
+# Six replies a model or a broken server could send. Each one is wrong in a
 # different way. We list them as data so adding a sixth later is one line.
 # The ids are labels pytest shows in its report, so a failure names the case.
 BAD_REPLIES = [
@@ -131,6 +131,18 @@ BAD_REPLIES = [
             }
         },
         id="tool_arguments_are_text_not_a_dict",
+    ),
+    pytest.param(
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                # A number where a list should be. A loop over a number
+                # crashes with TypeError, not our clear ValueError.
+                "tool_calls": 5,
+            }
+        },
+        id="tool_calls_is_a_number_not_a_list",
     ),
 ]
 
