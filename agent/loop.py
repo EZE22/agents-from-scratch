@@ -54,7 +54,28 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.
     for step in range(1, MAX_STEPS + 1):
-        reply = model(messages, tools=TOOL_SPECS)
+        # Only the model call sits inside the try. A ValueError from anywhere
+        # else in the loop is a bug in our code, and we want to see it.
+        try:
+            reply = model(messages, tools=TOOL_SPECS)
+        except ValueError as error:
+            # The model call raises ValueError when parse_reply refuses a
+            # bad reply. We never got a parsed reply, so there is nothing
+            # to record from the model. We tell it what went wrong and ask
+            # again. The next pass of the loop is the retry. We log the
+            # step and the status only, never the error text.
+            logger.warning("step %d: model reply was refused", step)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Your last reply could not be read: {error} "
+                        "Reply again with a valid tool call or a plain "
+                        "text answer."
+                    ),
+                }
+            )
+            continue
 
         # No tool request means the model chose to answer. We stop.
         if not reply.tool_calls:

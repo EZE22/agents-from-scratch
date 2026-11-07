@@ -167,3 +167,36 @@ def test_agent_logs_a_warning_when_the_step_limit_stops_it(
         if record.levelno == logging.WARNING
     ]
     assert any("step limit" in line for line in warnings)
+
+
+def test_agent_recovers_when_one_model_reply_is_refused() -> None:
+    """Protects: a single bad reply does not crash the run.
+
+    Why it matters:
+        Small models often send a broken tool call. A customer expects the
+        agent to ask again, not to fall over. The loop catches the refusal,
+        tells the model what went wrong, and asks again.
+
+    What a reader might get wrong:
+        The refused call still counts as a step, so the run ends with
+        steps == 2. The step limit stays a hard cap on every model call.
+        The message back to the model has the role "user", because no tool
+        ran, so there is no tool result to send.
+    """
+    model = FakeModel(
+        [
+            ValueError("Bad model reply: a tool call has no name"),
+            ModelReply(content="Paris"),
+        ]
+    )
+
+    result = run_agent("What is the capital of France?", model)
+
+    assert result.answer == "Paris"
+    assert result.stop_reason == "answered"
+    assert result.steps == 2
+
+    # The model must be told why its reply was refused, or it cannot fix it.
+    last_message = model.calls[1][0][-1]
+    assert last_message["role"] == "user"
+    assert "a tool call has no name" in str(last_message["content"])
