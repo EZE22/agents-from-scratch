@@ -1,7 +1,7 @@
 """Tests for the agent loop."""
 
 from agent.fake_model import FakeModel
-from agent.loop import run_agent
+from agent.loop import MAX_STEPS, run_agent
 from agent.model import ModelReply, ToolCall
 
 
@@ -48,3 +48,21 @@ def test_agent_runs_the_tool_then_answers() -> None:
     second_call_messages = model.calls[1][0]
     assert second_call_messages[-1]["role"] == "tool"
     assert second_call_messages[-1]["content"] == "4"
+
+
+def test_agent_stops_at_the_step_limit_when_model_never_answers() -> None:
+    # Protects: the hard step limit. A model can ask for tools forever, and
+    # a customer pays for every ask. The script has exactly MAX_STEPS tool
+    # requests and nothing else. If the loop asked even once more, FakeModel
+    # would raise an error and fail this test loudly.
+    tool_request = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="count_words", arguments={"text": "a b"})],
+    )
+    model = FakeModel([tool_request] * MAX_STEPS)
+
+    result = run_agent("Keep counting forever.", model)
+
+    assert result.stop_reason == "step_limit"
+    assert result.steps == MAX_STEPS
+    assert len(model.calls) == MAX_STEPS
