@@ -8,8 +8,19 @@ Right now it holds the shape of a model reply. The function that calls the
 model comes later, test first.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+
+# Where Ollama listens for chat requests on this computer. 11434 is Ollama's
+# standard port. A customer's setup may use a different host, so this will
+# become a setting we read from the environment. That gets its own test first.
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+
+# The model we chose in step 2. Same note as above: a setting later, a constant
+# for now.
+DEFAULT_MODEL = "qwen3:8b"
 
 
 @dataclass
@@ -219,3 +230,44 @@ def build_request(
         request["tools"] = tools
 
     return request
+
+
+def call_model(
+    messages: list[dict[str, str]],
+    tools: list[dict[str, object]] | None = None,
+    *,
+    post: Callable[[str, dict[str, Any]], dict[str, Any]],
+    model: str = DEFAULT_MODEL,
+) -> ModelReply:
+    """Send a conversation to the model and return its reply.
+
+    This is the one function the rest of the project uses to reach a model. It
+    joins three steps: build the request, send it, check the answer.
+
+    The first two parameters match FakeModel, so either can be handed to the
+    agent loop. The parameters after the star are extra settings, and the loop
+    never has to pass them.
+
+    Args:
+        messages: The conversation so far, a list of {"role", "content"} dicts.
+        tools: The tools the model may ask for, or None to offer none.
+        post: The function that really sends the request. It takes an address
+            and a request dictionary and returns the reply as a dictionary. We
+            pass it in so tests can hand in a pretend one and never touch a
+            network.
+        model: The Ollama model name.
+
+    Returns:
+        The model's reply as a ModelReply.
+
+    Raises:
+        ValueError: If the reply is malformed (raised by parse_reply).
+
+    What a reader might get wrong:
+        post has no default yet, so you must pass it. The real sender is the
+        next piece we write, and we check it by hand, because tests never call
+        a real model. After that, it becomes the default.
+    """
+    request = build_request(model, messages, tools)
+    raw_reply = post(OLLAMA_CHAT_URL, request)
+    return parse_reply(raw_reply)
