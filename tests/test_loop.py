@@ -80,3 +80,31 @@ def test_agent_offers_the_tool_to_the_model() -> None:
     assert tools_offered is not None
     names = [tool["function"]["name"] for tool in tools_offered]
     assert names == ["count_words"]
+
+
+def test_agent_records_the_models_tool_request_before_the_result() -> None:
+    # Protects: the conversation reads in the order it happened. The model
+    # asks for a tool, then the result follows. A real model that sees a
+    # tool result with no request before it can get confused about what
+    # the result is for. The request is stored the way Ollama expects.
+    model = FakeModel(
+        [
+            ModelReply(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="count_words",
+                        arguments={"text": "one two three four"},
+                    )
+                ],
+            ),
+            ModelReply(content="The text has 4 words."),
+        ]
+    )
+
+    run_agent("How many words are in 'one two three four'?", model)
+
+    second_call_messages = model.calls[1][0]
+    request_message = second_call_messages[-2]
+    assert request_message["role"] == "assistant"
+    assert request_message["tool_calls"][0]["function"]["name"] == "count_words"

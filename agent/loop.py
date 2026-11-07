@@ -58,6 +58,21 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
                 answer=reply.content, stop_reason="answered", steps=step
             )
 
+        # Record what the model asked for, in the shape Ollama expects, so
+        # the conversation shows the request and then its result. The
+        # arguments stay a dict here. Some hosted models want a JSON string
+        # instead, and that difference belongs in call_model, not in the loop.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": reply.content,
+                "tool_calls": [
+                    {"function": {"name": call.name, "arguments": call.arguments}}
+                    for call in reply.tool_calls
+                ],
+            }
+        )
+
         # The model only asked. Our code runs the tool, then sends the
         # result back as a message so the model can use it on the next pass.
         for call in reply.tool_calls:
