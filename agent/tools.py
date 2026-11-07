@@ -4,6 +4,7 @@ A tool is plain code with one narrow job. The model can ask for it, but our
 code decides whether to run it. Nothing in this file talks to a model.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -37,23 +38,32 @@ def count_words(text: str) -> ToolResult:
     return ToolResult(status="ok", content=str(len(text.split())))
 
 
+# The table of tools the model is allowed to ask for. The key is the name the
+# model uses, the value is our function. Adding a tool later means adding one
+# line here. The model can never reach a function that is not in this table.
+TOOLS: dict[str, Callable[..., ToolResult]] = {"count_words": count_words}
+
+
 def run_tool(name: str, arguments: dict[str, object]) -> ToolResult:
     """Run the tool the model asked for, or say why we could not.
 
     This is the one door between the model's request and our tools. The
-    model only asks. Our code decides what runs. Right now every name is
-    treated as unknown, because the first test only covers that path. The
-    next test will make real tools run.
+    model only asks. Our code decides what runs.
 
-    arguments is not used yet. It is in the signature now so the loop can
-    call run_tool the final way from the start.
+    An unknown name returns a failed result with a plain message the model
+    can read. It names the bad tool and lists the real ones, so the model
+    can correct itself. A reader might expect an exception here. We return
+    a result instead, because an exception would crash the whole agent run.
 
-    A failed result holds a plain message the model can read. It names the
-    bad tool and lists the real ones, so the model can correct itself. A
-    reader might expect an exception here. We return a result instead,
-    because an exception would crash the whole agent run.
+    Known gap: arguments are passed straight to the tool. If the model sends
+    wrong or missing arguments, Python raises an error. The next tests fix
+    that, because we never trust what a model sends.
     """
-    return ToolResult(
-        status="failed",
-        content=f"Unknown tool '{name}'. Available tools: count_words.",
-    )
+    tool = TOOLS.get(name)
+    if tool is None:
+        available = ", ".join(TOOLS)
+        return ToolResult(
+            status="failed",
+            content=f"Unknown tool '{name}'. Available tools: {available}.",
+        )
+    return tool(**arguments)

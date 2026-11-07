@@ -23,3 +23,12 @@ def test_run_tool_unknown_name_returns_failed_result() -> None:
     assert result.status == "failed"
     assert "delete_everything" in result.content
     assert "count_words" in result.content
+
+
+def test_run_tool_runs_a_known_tool() -> None:
+    # Protects: a valid request from the model really runs the tool and
+    # returns its result. The arguments arrive as a dict of names and
+    # values, which is the shape Ollama sends for tool calls.
+    result = run_tool("count_words", {"text": "one two three four"})
+
+    assert result == ToolResult(status="ok", content="4")
