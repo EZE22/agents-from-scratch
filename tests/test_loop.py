@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from agent.fake_model import FakeModel
-from agent.loop import MAX_STEPS, run_agent
+from agent.loop import MAX_BAD_REPLIES, MAX_STEPS, MAX_TOOL_FAILURES, run_agent
 from agent.model import ModelReply, ToolCall
 
 
@@ -167,3 +167,128 @@ def test_agent_logs_a_warning_when_the_step_limit_stops_it(
         if record.levelno == logging.WARNING
     ]
     assert any("step limit" in line for line in warnings)
+
+
+def test_agent_recovers_when_one_model_reply_is_refused() -> None:
+    """Protects: a single bad reply does not crash the run.
+
+    Why it matters:
+        Small models often send a broken tool call. A customer expects the
+        agent to ask again, not to fall over. The loop catches the refusal,
+        tells the model what went wrong, and asks again.
+
+    What a reader might get wrong:
+        The refused call still counts as a step, so the run ends with
+        steps == 2. The step limit stays a hard cap on every model call.
+        The message back to the model has the role "user", because no tool
+        ran, so there is no tool result to send.
+    """
+    model = FakeModel(
+        [
+            ValueError("Bad model reply: a tool call has no name"),
+            ModelReply(content="Paris"),
+        ]
+    )
+
+    result = run_agent("What is the capital of France?", model)
+
+    assert result.answer == "Paris"
+    assert result.stop_reason == "answered"
+    assert result.steps == 2
+
+    # The model must be told why its reply was refused, or it cannot fix it.
+    last_message = model.calls[1][0][-1]
+    assert last_message["role"] == "user"
+    assert "a tool call has no name" in str(last_message["content"])
+
+
+def test_agent_stops_with_bad_replies_when_the_model_keeps_being_refused() -> None:
+    """Protects: the retry limit for bad replies.
+
+    Why it matters:
+        A small model can get stuck sending the same broken tool call. Every
+        ask costs time and money, so we stop after a few refusals and name
+        the reason. A person reading the logs then knows the model failed,
+        not the tool.
+
+    What a reader might get wrong:
+        The script holds exactly MAX_BAD_REPLIES errors. If the loop asked
+        the model once more, FakeModel would raise an error and fail this
+        test. The limit counts every refused reply in one run. It is lower
+        than MAX_STEPS, so it is reached first when every reply is bad.
+    """
+    refused = ValueError("Bad model reply: a tool call has no name")
+    model = FakeModel([refused] * MAX_BAD_REPLIES)
+
+    result = run_agent("What is the capital of France?", model)
+
+    assert result.stop_reason == "bad_replies"
+    assert result.answer == ""
+    assert result.steps == MAX_BAD_REPLIES
+
+
+def test_agent_stops_with_tool_failures_when_every_tool_call_fails() -> None:
+    """Protects: the limit on failed tool calls.
+
+    Why it matters:
+        A model can ask for a tool that does not exist, again and again.
+        run_tool answers each time with a failed result the model can read,
+        but a stuck model may ignore it. We stop after a few failures and
+        name the reason, so the logs say the tool calls failed, not that
+        the model ran out of steps.
+
+    What a reader might get wrong:
+        get_weather is not a real tool in this project, so every call fails.
+        The script holds exactly MAX_TOOL_FAILURES replies. If the loop asked
+        the model once more, FakeModel would raise an error and fail this
+        test.
+    """
+    bad_call = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="get_weather", arguments={"city": "Atlanta"})],
+    )
+    model = FakeModel([bad_call] * MAX_TOOL_FAILURES)
+
+    result = run_agent("What is the weather in Atlanta?", model)
+
+    assert result.stop_reason == "tool_failures"
+    assert result.answer == ""
+    assert result.steps == MAX_TOOL_FAILURES
+
+
+def test_agent_recovers_after_a_failed_tool_call() -> None:
+    """Protects: a failed tool call is a message, not the end of the run.
+
+    Why it matters:
+        Models often guess a tool name wrong. A customer expects the agent
+        to read the failure and try again. The failed result must reach the
+        model and name the real tools, or the model cannot fix its mistake.
+
+    What a reader might get wrong:
+        One failure is well under MAX_TOOL_FAILURES, so the run goes on.
+        The steps count is 3: the wrong tool, the right tool, the answer.
+    """
+    wrong_tool = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="get_weather", arguments={"city": "Atlanta"})],
+    )
+    right_tool = ModelReply(
+        content="",
+        tool_calls=[
+            ToolCall(name="count_words", arguments={"text": "one two three"})
+        ],
+    )
+    model = FakeModel(
+        [wrong_tool, right_tool, ModelReply(content="The text has 3 words.")]
+    )
+
+    result = run_agent("How many words are in 'one two three'?", model)
+
+    assert result.stop_reason == "answered"
+    assert result.steps == 3
+
+    # What the model saw right after its wrong guess: a tool message that
+    # names the real tool, so it can choose again.
+    after_failure = model.calls[1][0][-1]
+    assert after_failure["role"] == "tool"
+    assert "count_words" in str(after_failure["content"])

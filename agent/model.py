@@ -158,6 +158,23 @@ def _read_tool_call(item: Any) -> ToolCall:
     return ToolCall(name=name, arguments=arguments)
 
 
+def _read_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
+    """Return the tools the model asked to run, or refuse the reply.
+
+    A reply that only speaks has no "tool_calls" key, so we start from an
+    empty list. If the key is there, it must be a list.
+    """
+    raw_calls = message.get("tool_calls", [])
+
+    # Without this check, a number would crash the loop below with a
+    # TypeError. We want our clear "Bad model reply" error instead.
+    # A reader might get wrong: a null value is refused too. That is strict
+    # on purpose. If a host sends null, it gets its own test first.
+    if not isinstance(raw_calls, list):
+        raise _bad_reply("'tool_calls' is not a list")
+    return [_read_tool_call(item) for item in raw_calls]
+
+
 def parse_reply(raw: dict[str, Any]) -> ModelReply:
     """Turn the raw reply from Ollama into our own ModelReply.
 
@@ -184,16 +201,15 @@ def parse_reply(raw: dict[str, Any]) -> ModelReply:
             "Bad model reply".
 
     What a reader might get wrong:
-        The checks cover the five bad replies we have tests for. They are not
-        complete. For example, "tool_calls" being something other than a list
-        is not checked yet. Each gap gets its own failing test before its fix.
+        The checks cover the six bad replies we have tests for. They are not
+        complete. For example, this function does not check that a tool name
+        is a tool we really have. run_tool does that. Each gap gets its own
+        failing test before its fix.
     """
     message = _read_message(raw)
     content = _read_content(message)
 
-    # A reply that only speaks has no "tool_calls" key at all. .get(..., [])
-    # gives an empty list in that case, instead of crashing.
-    tool_calls = [_read_tool_call(item) for item in message.get("tool_calls", [])]
+    tool_calls = _read_tool_calls(message)
 
     return ModelReply(content=content, tool_calls=tool_calls)
 

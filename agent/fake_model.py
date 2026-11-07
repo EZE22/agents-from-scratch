@@ -30,11 +30,13 @@ class FakeModel:
             (messages, tools), exactly as the caller passed them.
     """
 
-    def __init__(self, replies: list[ModelReply]) -> None:
+    def __init__(self, replies: list[ModelReply | Exception]) -> None:
         """Store the script.
 
         Args:
             replies: The replies to hand back, first call gets the first one.
+                An item can also be an error. The fake raises it on that call
+                instead of returning it.
         """
         # list(...) makes our own copy. Without it, later changes to the
         # caller's list would silently change our script too.
@@ -69,6 +71,8 @@ class FakeModel:
 
         Raises:
             RuntimeError: If every scripted reply has already been used.
+            Exception: The scripted error itself, when the next item in the
+                script is an error.
         """
         # Record a snapshot of the messages, not the live list. The agent loop
         # keeps adding to one growing list. If we stored that same list, every
@@ -95,4 +99,11 @@ class FakeModel:
 
         reply = self._replies[self._next_index]
         self._next_index += 1
+
+        # A scripted error is raised, not returned. This mimics the real
+        # call_model, which raises ValueError when a reply is refused.
+        # The index moved on above, so the error uses up one call, and the
+        # next call gets the next item in the script.
+        if isinstance(reply, Exception):
+            raise reply
         return reply

@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 # the model cannot talk its way past. Five is enough for one tool.
 MAX_STEPS = 5
 
+# The most refused replies we accept in one run. A model that is stuck
+# sending broken tool calls will not fix itself on the tenth try, and every
+# try costs time and money. It is lower than MAX_STEPS on purpose, so this
+# limit is reached first when every reply is bad. Three is a starting point,
+# and the model comparison will show whether it is a good one.
+MAX_BAD_REPLIES = 3
+
+# The most failed tool calls we accept in one run. A failed call means the
+# model asked for a tool that does not exist, or gave it the wrong inputs.
+# The model gets a readable message each time, so a few tries are fair. A
+# model that keeps failing is stuck, and each try costs time and money.
+MAX_TOOL_FAILURES = 3
+
 
 @dataclass
 class AgentResult:
@@ -51,10 +64,51 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     """
     messages: list[Message] = [{"role": "user", "content": question}]
 
+    # How many replies have been refused so far in this run.
+    bad_replies = 0
+
+    # How many tool calls have failed so far in this run.
+    tool_failures = 0
+
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.
     for step in range(1, MAX_STEPS + 1):
-        reply = model(messages, tools=TOOL_SPECS)
+        # Only the model call sits inside the try. A ValueError from anywhere
+        # else in the loop is a bug in our code, and we want to see it.
+        try:
+            reply = model(messages, tools=TOOL_SPECS)
+        except ValueError as error:
+            # The model call raises ValueError when parse_reply refuses a
+            # bad reply. We never got a parsed reply, so there is nothing
+            # to record from the model. We tell it what went wrong and ask
+            # again. The next pass of the loop is the retry. We log the
+            # step and the status only, never the error text.
+            bad_replies += 1
+            logger.warning(
+                "step %d: model reply was refused (%d of %d)",
+                step,
+                bad_replies,
+                MAX_BAD_REPLIES,
+            )
+
+            # Out of tries. The code stops the run, not the model, and it
+            # names the reason so the logs never leave anyone guessing.
+            if bad_replies >= MAX_BAD_REPLIES:
+                return AgentResult(
+                    answer="", stop_reason="bad_replies", steps=step
+                )
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Your last reply could not be read: {error} "
+                        "Reply again with a valid tool call or a plain "
+                        "text answer."
+                    ),
+                }
+            )
+            continue
 
         # No tool request means the model chose to answer. We stop.
         if not reply.tool_calls:
@@ -100,6 +154,20 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
                     "tool_name": call.name,
                 }
             )
+
+            # The failed result is already in the conversation, so the model
+            # has been told. Now we count it. The code stops the run, not the
+            # model, and names the reason. A reader might get wrong: one
+            # reply with two failed calls counts as two failures.
+            if result.status == "failed":
+                tool_failures += 1
+                if tool_failures >= MAX_TOOL_FAILURES:
+                    logger.warning(
+                        "stopped after %d failed tool calls", tool_failures
+                    )
+                    return AgentResult(
+                        answer="", stop_reason="tool_failures", steps=step
+                    )
 
     # We only get here if every pass ended in a tool request. The cap
     # stopped the run, not the model. This is a warning, not info, because

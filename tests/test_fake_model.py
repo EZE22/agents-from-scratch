@@ -118,3 +118,24 @@ def test_fake_model_records_what_it_was_sent_as_a_snapshot() -> None:
     # The recorded call must still show only the one message it received at
     # the time. If this fails, the fake stored a reference, not a snapshot.
     assert len(fake.calls[0][0]) == 1
+
+
+def test_fake_model_raises_a_scripted_error() -> None:
+    """Protects our ability to test refused replies without a real model.
+
+    Why it matters:
+        The real call_model raises ValueError when parse_reply refuses a
+        reply. To test how the loop copes, the fake must do the same on cue.
+
+    What a reader might get wrong:
+        The error sits in the same script as the replies and uses up one
+        call, just like a reply. The second call returns a reply, to show
+        the script moves on after the error.
+    """
+    good = ModelReply(content="ok")
+    fake = FakeModel([ValueError("Bad model reply: test"), good])
+
+    with pytest.raises(ValueError, match="Bad model reply"):
+        fake([{"role": "user", "content": "hi"}])
+
+    assert fake([{"role": "user", "content": "again"}]) is good
