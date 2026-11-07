@@ -8,6 +8,8 @@ Right now it holds the shape of a model reply. The function that calls the
 model comes later, test first.
 """
 
+import json
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +19,11 @@ from typing import Any
 # standard port. A customer's setup may use a different host, so this will
 # become a setting we read from the environment. That gets its own test first.
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+
+# How long to wait for Ollama before giving up, in seconds. Without a limit, a
+# stuck server would freeze the whole program forever. Two minutes is generous,
+# because the first call after starting Ollama has to load the model first.
+REQUEST_TIMEOUT_SECONDS = 120
 
 # The model we chose in step 2. Same note as above: a setting later, a constant
 # for now.
@@ -271,3 +278,41 @@ def call_model(
     request = build_request(model, messages, tools)
     raw_reply = post(OLLAMA_CHAT_URL, request)
     return parse_reply(raw_reply)
+
+
+def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Send a dictionary to an address as JSON and return the JSON reply.
+
+    This is the only function in the project that uses the network. Keeping it
+    this small means that any network problem, like a slow server, a wrong
+    address or a login header, has exactly one place to be fixed.
+
+    It uses Python's built in tools, so we need no extra package. That keeps CI
+    small.
+
+    Args:
+        url: The full address to send to.
+        payload: The request, as a dictionary. It is turned into JSON here.
+
+    Returns:
+        The reply, turned from JSON back into a dictionary.
+
+    What a reader might get wrong:
+        The timeout line has no test of its own yet. A test would need a server
+        that never answers. Also, errors like "Ollama is not running" are not
+        handled yet. They get a clear message in a later step, test first.
+    """
+    # JSON is text, but the network sends bytes. .encode turns text into bytes.
+    body = json.dumps(payload).encode("utf-8")
+
+    # Content-Type tells the server what kind of data the body holds.
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    # "with" closes the connection for us when we are done, even on an error.
+    with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read())
