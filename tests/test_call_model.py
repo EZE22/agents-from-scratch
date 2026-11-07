@@ -17,8 +17,10 @@ Why this matters to a customer:
     network changes the sender, not the rest of the system.
 """
 
-# call_model does not exist yet, so this import is the first thing that fails.
-# That is the red step.
+# pytest gives us monkeypatch, which swaps something out for the length of one
+# test and puts it back afterwards. We use it in the second test below.
+import pytest
+
 from agent.model import ModelReply, build_request, call_model
 
 
@@ -66,3 +68,39 @@ def test_call_model_builds_the_request_sends_it_and_parses_the_reply() -> None:
     # The request is exactly what build_request makes. We compare against
     # build_request itself, so this test does not repeat its details.
     assert seen["payload"] == build_request("qwen3:8b", messages)
+
+
+def test_call_model_uses_the_real_sender_when_none_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Protects the normal way the real program calls the model:
+    call_model(messages), with no helper passed in.
+
+    Why it matters:
+        The agent loop will call call_model with just the conversation. If the
+        real sender were not the default, the loop would have to know about
+        network details, which is exactly what this function hides.
+
+    What a reader might get wrong:
+        We still do not touch the network. monkeypatch swaps the real sender,
+        post_json, for a pretend one while this test runs, then puts the real
+        one back. The test checks that call_model reaches for post_json when
+        nobody hands it a helper.
+    """
+    messages = [{"role": "user", "content": "hi"}]
+    sent: list[dict[str, object]] = []
+
+    def pretend_post_json(url: str, payload: dict[str, object]) -> dict[str, object]:
+        """Stands in for the real sender. It writes down the request and
+        answers with a made up reply."""
+        sent.append(payload)
+        return {"message": {"role": "assistant", "content": "From the default"}}
+
+    # Swap the real sender for the pretend one, by its place in agent.model.
+    monkeypatch.setattr("agent.model.post_json", pretend_post_json)
+
+    # No post argument this time.
+    reply = call_model(messages)
+
+    assert reply == ModelReply(content="From the default")
+    assert sent == [build_request("qwen3:8b", messages)]

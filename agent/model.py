@@ -244,7 +244,7 @@ def call_model(
     messages: list[dict[str, str]],
     tools: list[dict[str, object]] | None = None,
     *,
-    post: Callable[[str, dict[str, Any]], dict[str, Any]],
+    post: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
     model: str = DEFAULT_MODEL,
 ) -> ModelReply:
     """Send a conversation to the model and return its reply.
@@ -260,9 +260,9 @@ def call_model(
         messages: The conversation so far, a list of {"role", "content"} dicts.
         tools: The tools the model may ask for, or None to offer none.
         post: The function that really sends the request. It takes an address
-            and a request dictionary and returns the reply as a dictionary. We
-            pass it in so tests can hand in a pretend one and never touch a
-            network.
+            and a request dictionary and returns the reply as a dictionary.
+            Leave it out to use the real sender, post_json. Tests hand in a
+            pretend one so they never touch a network.
         model: The Ollama model name.
 
     Returns:
@@ -272,12 +272,20 @@ def call_model(
         ValueError: If the reply is malformed (raised by parse_reply).
 
     What a reader might get wrong:
-        post has no default yet, so you must pass it. The real sender is the
-        next piece we write, and we check it by hand, because tests never call
-        a real model. After that, it becomes the default.
+        The default for post is None, not post_json. That looks odd, but there
+        are two reasons. A default is fixed the moment the function is defined,
+        and post_json is defined further down this file. Also, a test could not
+        swap a fixed default for a pretend one. Choosing inside the function
+        fixes both.
     """
     request = build_request(model, messages, tools)
-    raw_reply = post(OLLAMA_CHAT_URL, request)
+
+    # If nobody handed us a sender, use the real one. "is not None" matters:
+    # a plain "post or post_json" would also replace a helper that happens to
+    # be falsy, which is not what we mean.
+    sender = post if post is not None else post_json
+
+    raw_reply = sender(OLLAMA_CHAT_URL, request)
     return parse_reply(raw_reply)
 
 
