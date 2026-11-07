@@ -9,6 +9,7 @@ model comes later, test first.
 """
 
 import json
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -297,10 +298,15 @@ def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         The reply, turned from JSON back into a dictionary.
 
+    Raises:
+        RuntimeError: If the server cannot be reached, for example when Ollama
+            is not running. The message says what to try.
+
     What a reader might get wrong:
         The timeout line has no test of its own yet. A test would need a server
-        that never answers. Also, errors like "Ollama is not running" are not
-        handled yet. They get a clear message in a later step, test first.
+        that never answers. Also, only an unreachable server is turned into a
+        plain message. Other problems, like a server error reply, are not
+        handled yet. Each gets its own test first.
     """
     # JSON is text, but the network sends bytes. .encode turns text into bytes.
     body = json.dumps(payload).encode("utf-8")
@@ -313,6 +319,20 @@ def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
 
-    # "with" closes the connection for us when we are done, even on an error.
-    with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-        return json.loads(response.read())
+    # The most common problem in the field is that the server is not running.
+    # The raw network error for that is long and means little to most people.
+    # URLError is the error Python raises when it cannot connect, so we catch
+    # that one and say what is wrong and what to try.
+    try:
+        # "with" closes the connection for us when we are done, even on an error.
+        with urllib.request.urlopen(
+            request, timeout=REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as error:
+        # "from error" keeps the original error attached. A person sees our
+        # plain sentence first, and a developer can still dig into the details.
+        raise RuntimeError(
+            f"Could not reach the model server at {url}. "
+            "Is Ollama running? Open the Ollama app, or run 'ollama serve'."
+        ) from error
