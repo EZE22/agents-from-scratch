@@ -32,3 +32,13 @@ def test_run_tool_runs_a_known_tool() -> None:
     result = run_tool("count_words", {"text": "one two three four"})
 
     assert result == ToolResult(status="ok", content="4")
+
+
+def test_run_tool_missing_argument_returns_failed_result() -> None:
+    # Protects: wrong arguments from the model never crash the agent. We
+    # never trust what a model sends. The failed message names the missing
+    # argument so the model can read it and try again with the right one.
+    result = run_tool("count_words", {})
+
+    assert result.status == "failed"
+    assert "text" in result.content

@@ -4,6 +4,7 @@ A tool is plain code with one narrow job. The model can ask for it, but our
 code decides whether to run it. Nothing in this file talks to a model.
 """
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -55,9 +56,8 @@ def run_tool(name: str, arguments: dict[str, object]) -> ToolResult:
     can correct itself. A reader might expect an exception here. We return
     a result instead, because an exception would crash the whole agent run.
 
-    Known gap: arguments are passed straight to the tool. If the model sends
-    wrong or missing arguments, Python raises an error. The next tests fix
-    that, because we never trust what a model sends.
+    Known gap: this checks argument names, not their types. A model could
+    send text=5 and the tool would still run. The next test covers that.
     """
     tool = TOOLS.get(name)
     if tool is None:
@@ -65,5 +65,16 @@ def run_tool(name: str, arguments: dict[str, object]) -> ToolResult:
         return ToolResult(
             status="failed",
             content=f"Unknown tool '{name}'. Available tools: {available}.",
+        )
+
+    # bind() only checks that the arguments fit the function. It does not
+    # run the function. We do not use a plain try around the call, because
+    # that would also hide real bugs inside the tool as "bad arguments".
+    try:
+        inspect.signature(tool).bind(**arguments)
+    except TypeError as error:
+        return ToolResult(
+            status="failed",
+            content=f"Bad arguments for '{name}': {error}",
         )
     return tool(**arguments)
