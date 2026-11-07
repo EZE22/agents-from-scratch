@@ -254,3 +254,41 @@ def test_agent_stops_with_tool_failures_when_every_tool_call_fails() -> None:
     assert result.stop_reason == "tool_failures"
     assert result.answer == ""
     assert result.steps == MAX_TOOL_FAILURES
+
+
+def test_agent_recovers_after_a_failed_tool_call() -> None:
+    """Protects: a failed tool call is a message, not the end of the run.
+
+    Why it matters:
+        Models often guess a tool name wrong. A customer expects the agent
+        to read the failure and try again. The failed result must reach the
+        model and name the real tools, or the model cannot fix its mistake.
+
+    What a reader might get wrong:
+        One failure is well under MAX_TOOL_FAILURES, so the run goes on.
+        The steps count is 3: the wrong tool, the right tool, the answer.
+    """
+    wrong_tool = ModelReply(
+        content="",
+        tool_calls=[ToolCall(name="get_weather", arguments={"city": "Atlanta"})],
+    )
+    right_tool = ModelReply(
+        content="",
+        tool_calls=[
+            ToolCall(name="count_words", arguments={"text": "one two three"})
+        ],
+    )
+    model = FakeModel(
+        [wrong_tool, right_tool, ModelReply(content="The text has 3 words.")]
+    )
+
+    result = run_agent("How many words are in 'one two three'?", model)
+
+    assert result.stop_reason == "answered"
+    assert result.steps == 3
+
+    # What the model saw right after its wrong guess: a tool message that
+    # names the real tool, so it can choose again.
+    after_failure = model.calls[1][0][-1]
+    assert after_failure["role"] == "tool"
+    assert "count_words" in str(after_failure["content"])
