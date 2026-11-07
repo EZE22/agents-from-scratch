@@ -57,6 +57,37 @@ def count_words(text: str) -> ToolResult:
 TOOLS: dict[str, Callable[..., ToolResult]] = {"count_words": count_words}
 
 
+# What we tell the model about each tool, in the shape Ollama expects. The
+# description is the model's only manual, so it says what the tool does and
+# when to use it. A vague description leads to wrong or missing tool calls.
+#
+# What a reader might get wrong: this list and the TOOLS table above are two
+# separate places that must name the same tools. Nothing forces that yet. A
+# test for it comes when a second tool makes drifting apart a real risk.
+TOOL_SPECS: list[dict[str, object]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "count_words",
+            "description": (
+                "Count the words in a piece of text. Use this whenever you "
+                "need an exact word count. Returns the count as a number."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to count the words in.",
+                    }
+                },
+                "required": ["text"],
+            },
+        },
+    }
+]
+
+
 def run_tool(name: str, arguments: dict[str, object]) -> ToolResult:
     """Run the tool the model asked for, or say why we could not.
 

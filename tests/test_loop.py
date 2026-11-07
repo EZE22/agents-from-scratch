@@ -66,3 +66,17 @@ def test_agent_stops_at_the_step_limit_when_model_never_answers() -> None:
     assert result.stop_reason == "step_limit"
     assert result.steps == MAX_STEPS
     assert len(model.calls) == MAX_STEPS
+
+
+def test_agent_offers_the_tool_to_the_model() -> None:
+    # Protects: the model is told which tools exist. A real model can only
+    # ask for a tool it has been shown. Without this, it would never call
+    # count_words, and the agent would quietly act like a plain chatbot.
+    model = FakeModel([ModelReply(content="Paris")])
+
+    run_agent("What is the capital of France?", model)
+
+    tools_offered = model.calls[0][1]
+    assert tools_offered is not None
+    names = [tool["function"]["name"] for tool in tools_offered]
+    assert names == ["count_words"]

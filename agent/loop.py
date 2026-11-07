@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from agent.model import ModelReply
-from agent.tools import run_tool
+from agent.tools import TOOL_SPECS, run_tool
 
 
 # The most times we will ask the model in one run. A model can ask for tools
@@ -42,16 +42,15 @@ def run_agent(question: str, model: Callable[..., ModelReply]) -> AgentResult:
     The model is passed in as a function. Tests pass FakeModel. A real run
     passes call_model. That keeps this loop free of any one model.
 
-    Known gaps, each coming with its own test: the model is not yet told
-    which tools exist, the model's own tool request is not yet added to the
-    messages, and nothing is logged yet.
+    Known gaps, each coming with its own test: the model's own tool request
+    is not yet added to the messages, and nothing is logged yet.
     """
     messages = [{"role": "user", "content": question}]
 
     # range stops by itself, so this loop cannot run forever. A while True
     # loop would rely on the model to stop, and a model can fail to.
     for step in range(1, MAX_STEPS + 1):
-        reply = model(messages)
+        reply = model(messages, tools=TOOL_SPECS)
 
         # No tool request means the model chose to answer. We stop.
         if not reply.tool_calls:
